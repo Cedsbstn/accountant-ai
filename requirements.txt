@@ -1,0 +1,15 @@
+sqlalchemy
+pydantic
+uvicorn
+fastapi
+python-multipart
+Pillow
+pdf2image
+easyocr
+torch
+torchvision
+torchaudio
+numpy
+asyncmy
+alembic
+python-dotenv
