@@ -27,3 +27,8 @@ AsyncSessionLocal = sessionmaker(
 
 # Base class for declarative models
 Base = declarative_base()
+
+# Dependency Injection
+async def get_db():
+    async with AsyncSessionLocal() as db:
+        yield db

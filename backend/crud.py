@@ -28,11 +28,17 @@ async def update_invoice_status(db: AsyncSession, invoice_id: str, status: str, 
         update(models.Invoice)
         .where(models.Invoice.id == invoice_id)
         .values(processingStatus=status, errorMessage=error_message)
-        .returning(models.Invoice) # Return the updated model
     )
     result = await db.execute(stmt)
     # Note: Commit handled by get_db
-    return result.scalar_one_or_none()
+
+    if result.rowcount > 0: # Check if the UPDATE actually affected a row
+         # Fetch the updated invoice using a separate SELECT statement
+        updated_invoice = await db.get(models.Invoice, invoice_id) # db.get is efficient for PK lookup
+        return updated_invoice
+    else:
+        # No row was updated (invoice_id might not exist)
+        return None
 
 # Add get_invoices, delete_invoice etc. as needed
 
@@ -76,16 +82,19 @@ async def add_tag_to_transaction(db: AsyncSession, transaction_id: str, tag: str
     current_tags = transaction.tags if isinstance(transaction.tags, list) else []
     if tag not in current_tags:
         new_tags = current_tags + [tag]
-        # Update the JSON field
         stmt = (
             update(models.Transaction)
             .where(models.Transaction.id == transaction_id)
             .values(tags=new_tags)
-            .returning(models.Transaction)
         )
-        result = await db.execute(stmt)
-        # Note: Commit handled by get_db
-        return result.scalar_one_or_none()
+        update_result = await db.execute(stmt)
+        if update_result.rowcount > 0:
+            # Fetch the updated transaction separately
+            updated_transaction = await db.get(models.Transaction, transaction_id)
+            return updated_transaction
+        else:
+            # Should not happen if transaction was found initially, but handle defensively
+            return None # Or raise an error
     return transaction # Return unmodified if tag exists
 
 # --- Budget CRUD ---

@@ -1,11 +1,7 @@
-from pydantic import BaseModel, Field, validator, root_validator
+from pydantic import BaseModel, Field, validator, root_validator, ConfigDict
 from typing import List, Optional
 from datetime import date, datetime
 import uuid
-
-# --- Base Config for ORM Mode ---
-class BaseConfig:
-    orm_mode = True # Allows Pydantic models to be created from ORM objects
 
 # --- Line Item Schemas ---
 class LineItemBase(BaseModel):
@@ -21,8 +17,8 @@ class LineItem(LineItemBase):
     id: int # Primary key from DB
     invoice_id: str # Foreign key
 
-    class Config(BaseConfig):
-        pass
+    # Use model_config for Pydantic V2
+    model_config = ConfigDict(from_attributes=True) # <-- USE THIS INSTEAD OF Config class
 
 # --- Invoice Schemas ---
 class InvoiceDataBase(BaseModel):
@@ -51,8 +47,8 @@ class InvoiceData(InvoiceDataBase):
     id: str # Primary key from DB
     lineItems: List[LineItem] = [] # Include related line items
 
-    class Config(BaseConfig):
-        pass
+    # Use model_config for Pydantic V2
+    model_config = ConfigDict(from_attributes=True) # <-- USE THIS INSTEAD OF Config class
 
 # --- Transaction Schemas ---
 class TransactionBase(BaseModel):
@@ -74,8 +70,8 @@ class Transaction(TransactionBase):
     id: str # Primary key from DB
     postingDate: date # Added by DB/server
 
-    class Config(BaseConfig):
-        pass
+    # Use model_config for Pydantic V2
+    model_config = ConfigDict(from_attributes=True) # <-- USE THIS INSTEAD OF Config class
 
 # --- Budget Schemas ---
 class BudgetBase(BaseModel):
@@ -90,9 +86,9 @@ class BudgetCreate(BudgetBase):
 class Budget(BudgetBase):
     id: str # Primary key from DB
 
-    class Config(BaseConfig):
-        pass
-
+    # Use model_config for Pydantic V2
+    model_config = ConfigDict(from_attributes=True) # <-- USE THIS INSTEAD OF Config class
+    
 # --- Schema for Processing Response ---
 # Reuse InvoiceData schema or create a specific one if needed
 class ProcessResponse(InvoiceData):

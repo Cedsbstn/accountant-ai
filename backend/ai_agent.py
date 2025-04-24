@@ -166,7 +166,6 @@ def create_transaction_schema_from_invoice(invoice_model: models.Invoice) -> Opt
         gl_account = "Marketing & Advertising"
     elif "office supplies" in vendor_lower or "staples" in vendor_lower:
         gl_account = "Office Supplies"
-    # TODO: Add vendor DB lookup here using crud functions if Vendor model exists
 
     transaction_schema = schemas.TransactionCreate(
         invoiceId=invoice_model.id,
@@ -275,19 +274,20 @@ async def process_invoice_file(
         if file: await file.close()
 
 
+from sqlalchemy import text
+
 @app.get("/health")
 async def health_check():
     try:
         # Perform a simple query to check database connectivity
         async with get_db() as db:
-            await db.execute("SELECT 1")
+            await db.execute(text("SELECT 1"))
         db_status = "connected"
     except Exception as e:
         logger.error(f"Database connection check failed: {e}")
         db_status = "disconnected"
 
     return {"status": "ok", "ocr_engine": "EasyOCR", "database": db_status}
-
 # --- Budgeting Endpoints (Refactored) ---
 
 @app.post("/budgets", status_code=201, response_model=schemas.Budget)
