@@ -280,9 +280,10 @@ from sqlalchemy import text
 async def health_check():
     try:
         # Perform a simple query to check database connectivity
-        async with get_db() as db:
-            await db.execute(text("SELECT 1"))
-        db_status = "connected"
+        db = get_db()
+        async for session in db:
+            await session.execute(text("SELECT 1"))
+        db_status = "connected with the database"
     except Exception as e:
         logger.error(f"Database connection check failed: {e}")
         db_status = "disconnected"

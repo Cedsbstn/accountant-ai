@@ -13,3 +13,4 @@ numpy
 asyncmy
 alembic
 python-dotenv
+google-generativeai
