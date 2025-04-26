@@ -270,3 +270,5 @@ function setDefaultDates() {
 
 setDefaultDates(); // Call on load
 console.log("Report handler initialized.");
+
+export { generateReport };

@@ -32,15 +32,44 @@ const upload = multer({
 
 // --- Express App Setup ---
 const app = express();
-const port = 3000;
+const port = 3001;
 
 app.use(cors());
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
+// Serve static files from frontend directory
+const frontendPath = path.join(__dirname, '../frontend');
+console.log('Serving frontend from:', frontendPath);
+
+// Serve static files with proper configuration
+app.use(express.static(frontendPath));
+
+// Debug middleware to log all requests
+app.use((req, res, next) => {
+    console.log(`[DEBUG] ${req.method} ${req.url}`);
+    next();
+});
+
+// Additional catch-all middleware for 404s
+app.use((req, res, next) => {
+    if (!res.headersSent) {
+        console.log(`[DEBUG] 404 Not Found: ${req.url}`);
+        res.status(404).send(`File not found: ${req.url}`);
+    }
+    next();
+});
+
 // --- Routes ---
 app.get('/', (req, res) => {
-  res.send('AI Accounting Agent Backend is Running!');
+    const indexPath = path.join(frontendPath, 'index.html');
+    console.log('Serving index.html from:', indexPath);
+    if (fs.existsSync(indexPath)) {
+        res.sendFile(indexPath);
+    } else {
+        console.error('index.html not found at:', indexPath);
+        res.status(404).send('index.html not found');
+    }
 });
 
 // Updated Upload Route - using multer middleware for single file named 'invoice'
@@ -87,7 +116,7 @@ app.post('/upload', upload.single('invoice'), async (req, res) => {
   } catch (err) {
     console.error("Error communicating with AI Agent:", err.message);
     res.status(500).json({ message: "AI agent error" });
-    fs.unlink(req.file/path, err => {
+    fs.unlink(req.file.path, err => {
         if (err) console.error("Error deleting temp file:", err.message);
     });
   }
@@ -95,5 +124,5 @@ app.post('/upload', upload.single('invoice'), async (req, res) => {
 
 // --- Start Server ---
 app.listen(port, () => {
-  console.log(`Backend server listening at http://localhost:${port}`);
+  console.log(`Backend server running at http://localhost:${port}`);
 });

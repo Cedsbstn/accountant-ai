@@ -2,6 +2,9 @@ import { processFileMock } from "./aiProcessor.js";
 import { validateInvoiceData } from "./validator.js";
 import { generateReport } from './reportHandler.js';
 
+// Get backend URL from window object
+const BACKEND_URL = window.BACKEND_URL || 'http://localhost:3001';
+
 const dropArea = document.getElementById("drop-area");
 const fileElem = document.getElementById("fileElem");
 const fileList = document.getElementById("fileList");

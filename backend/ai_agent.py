@@ -18,9 +18,9 @@ from PIL import Image
 from pdf2image import convert_from_bytes
 
 # --- Project Imports ---
-from . import crud, models, schemas # Use relative imports
-from .database import engine, Base # Import engine/Base if needed for migrations setup
-from .dependencies import get_db # Import the dependency
+from backend import crud, models, schemas
+from backend.database import engine, Base
+from backend.dependencies import get_db
 
 # --- Configuration & Initialization ---
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')

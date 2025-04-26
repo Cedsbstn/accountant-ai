@@ -5,7 +5,11 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <meta name="description" content="Dashboard for uploading and managing invoices with the AI Accounting Agent." />
   <title>AI Accounting Agent Dashboard</title>
-  <link rel="stylesheet" href="css/styles.css" />
+  <link rel="stylesheet" href="./css/styles.css" />
+  <script>
+    // Set backend URL
+    window.BACKEND_URL = 'http://localhost:3001';
+  </script>
 </head>
 <body>
   <header class="main-header">
@@ -37,23 +41,26 @@
 
     <section class="transactions-section">
       <h2>Processed Transactions</h2>
-      <div class="table-container" style="display: none;">
+      <div class="table-container">
         <table id="transactionsTable" aria-label="List of processed invoice transactions">
-            <caption>Summary of recently processed invoices</caption>
-            <thead>
-                <tr>
-                    <!-- Use scope for accessibility -->
-                    <th scope="col">File Name</th>
-                    <th scope="col">Vendor</th>
-                    <th scope="col">Invoice #</th>
-                    <th scope="col">Invoice Date</th>
-                    <th scope="col">Total Amount</th>
-                    <th scope="col">Status</th>
-                    <th scope="col">Actions</th> <!-- Placeholder for view/edit actions -->
-                </tr>
-            </thead>
-        <tbody></tbody>
-      </table>
+          <caption>Summary of recently processed invoices</caption>
+          <thead>
+            <tr>
+              <th scope="col">File Name</th>
+              <th scope="col">Vendor</th>
+              <th scope="col">Invoice #</th>
+              <th scope="col">Invoice Date</th>
+              <th scope="col">Total Amount</th>
+              <th scope="col">Status</th>
+              <th scope="col">Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr class="empty-table-placeholder">
+              <td colspan="7">No transactions yet</td>
+            </tr>
+          </tbody>
+        </table>
       </div>
     </section>
 
@@ -63,23 +70,22 @@
       <div class="report-controls">
         <label for="reportType">Report Type:</label>
         <select id="reportType">
-            <option value="">-- Select Report --</option>
-            <option value="pnl">Profit & Loss</option>
-            <option value="balance">Balance Sheet</option>
-            <option value="ap">Accounts Payable Aging</option>
-            <option value="cashflow">Cash Flow Statement</option>
-            <option value="transactions">Transaction List</option>
-            <option value="sales">Sales Report</option>
-            <option value="expenses">Expenses Report</option>
+          <option value="">-- Select Report --</option>
+          <option value="pnl">Profit & Loss</option>
+          <option value="balance">Balance Sheet</option>
+          <option value="ap">Accounts Payable Aging</option>
+          <option value="cashflow">Cash Flow Statement</option>
+          <option value="transactions">Transaction List</option>
+          <option value="sales">Sales Report</option>
+          <option value="expenses">Expenses Report</option>
         </select>
-        <!-- Date Range Picker (initially hidden, shown based on report type) -->
         <div id="dateRangePicker" class="date-range" style="display: none;">
-            <label for="startDate">Start Date:</label>
-            <input type="date" id="startDate" name="startDate">
-            <label for="endDate">End Date:</label>
-            <input type="date" id="endDate" name="endDate">
+          <label for="startDate">Start Date:</label>
+          <input type="date" id="startDate" name="startDate">
+          <label for="endDate">End Date:</label>
+          <input type="date" id="endDate" name="endDate">
         </div>
-        <button id="generateReport">Generate</button>
+        <button id="generateReportButton">Generate</button>
       </div>
       <div id="reportOutput" aria-live="polite"></div>
     </section>
@@ -92,8 +98,8 @@
   <script>
     document.getElementById('currentYear').textContent = new Date().getFullYear();
   </script>
-  <script type="module" src="js/fileHandler.js"></script>
-  <script type="module" src="js/reportHandler.js"></script>
+  <script type="module" src="./js/fileHandler.js"></script>
+  <script type="module" src="./js/reportHandler.js"></script>
   <script>
     // Theme toggle functionality
     const themeSelect = document.getElementById('themeSelect');
