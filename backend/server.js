@@ -10,7 +10,7 @@ const { error } = require('console');
 // --- Multer Configuration ---
 const UPLOAD_DIR = './uploads'; // Directory to save uploaded files
 // Ensure upload directory exists
-if (!fs.existsSync(UPLOAD_DIR)){
+if (!fs.existsSync(UPLOAD_DIR)) {
     fs.mkdirSync(UPLOAD_DIR, { recursive: true });
 }
 
@@ -84,45 +84,45 @@ app.post('/upload', upload.single('invoice'), async (req, res) => {
     const allowedTypes = ['application/pdf', 'image/jpeg', 'image/png'];
     if (!allowedTypes.includes(req.file.mimetype)) {
         console.error("Invalid file type:", req.file.mimetype);
-         // Delete the uploaded file since it's invalid
+        // Delete the uploaded file since it's invalid
         fs.unlinkSync(req.file.path);
         return res.status(400).json({ message: 'Invalid file type.' });
     }
     console.log('File uploaded successfully:', req.file.originalname);
 
     // ✅ Forward file to Python AI Agent
-  try {
-    const formData = new FormData();
-    formData.append("file", fs.createReadStream(req.file.path), req.file.originalname);
+    try {
+        const formData = new FormData();
+        formData.append("file", fs.createReadStream(req.file.path), req.file.originalname);
 
-    const response = await axios.post("http://localhost:5001/process", formData, {
-      headers: formData.getHeaders()
-    });
+        const response = await axios.post("http://localhost:5001/process", formData, {
+            headers: formData.getHeaders()
+        });
 
-    res.json({
-      message: 'Processed by Python AI Agent',
-      data: response.data
-    });
-    const requiredFields = [
-        "vendor", "invoiceDate", "dueDate", "invoiceNumber", "lineItems", "subtotal", "tax", "totalAmount"
-    ];
+        res.json({
+            message: 'Processed by Python AI Agent',
+            data: response.data
+        });
+        const requiredFields = [
+            "vendor", "invoiceDate", "dueDate", "invoiceNumber", "lineItems", "subtotal", "tax", "totalAmount"
+        ];
 
-    const missing = requiredFields.filter(f => !(f in response.data));
-    if (missing.length > 0) {
-        console.error("Missing fields from AI Agent:", missing);
-        return res.status(500).json({ message: `AI response missing: ${missing.join(', ')}` });
+        const missing = requiredFields.filter(f => !(f in response.data));
+        if (missing.length > 0) {
+            console.error("Missing fields from AI Agent:", missing);
+            return res.status(500).json({ message: `AI response missing: ${missing.join(', ')}` });
+        }
+
+    } catch (err) {
+        console.error("Error communicating with AI Agent:", err.message);
+        res.status(500).json({ message: "AI agent error" });
+        fs.unlink(req.file.path, err => {
+            if (err) console.error("Error deleting temp file:", err.message);
+        });
     }
-
-  } catch (err) {
-    console.error("Error communicating with AI Agent:", err.message);
-    res.status(500).json({ message: "AI agent error" });
-    fs.unlink(req.file.path, err => {
-        if (err) console.error("Error deleting temp file:", err.message);
-    });
-  }
 });
 
 // --- Start Server ---
 app.listen(port, () => {
-  console.log(`Backend server running at http://localhost:${port}`);
+    console.log(`Backend server running at http://localhost:${port}`);
 });
