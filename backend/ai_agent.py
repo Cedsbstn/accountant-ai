@@ -390,7 +390,7 @@ async def health_check():
         db = get_db()
         async for session in db:
             await session.execute(text("SELECT 1"))
-        db_status = "connected with the"
+        db_status = "connected with"
     except Exception as e:
         logger.error(f"Database connection check failed: {e}")
         db_status = "disconnected"

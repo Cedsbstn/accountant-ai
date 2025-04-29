@@ -1,5 +1,5 @@
 import { processFileMock } from "./aiProcessor.js";
-import { validateInvoiceData } from "./validator.js";
+// import { validateInvoiceData } from "./validator.js"; // Removed validation
 import { generateReport } from './reportHandler.js';
 
 // Get backend URL from window object
@@ -38,7 +38,7 @@ function addTransactionToTable(data, fileName) {
 
   const row = transactionsTableBody.insertRow(); // Insert row at the end
   row.setAttribute('data-invoice-id', data.id || ''); // Add data attribute for potential future actions
-  
+
   // Use Intl for formatting currency and dates potentially
   const currencyFormatter = new Intl.NumberFormat(undefined, { style: 'currency', currency: data.currency || 'USD' });
   const dateFormatter = new Intl.DateTimeFormat(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
@@ -55,6 +55,35 @@ function addTransactionToTable(data, fileName) {
   transactionsTableBody.appendChild(row);
 }
 
+// Function to send file to backend
+async function processFileBackend(file) {
+    const formData = new FormData();
+    formData.append('invoice', file); // 'invoice' is the field name expected by the backend
+
+    try {
+        const response = await fetch(`${BACKEND_URL}/upload`, { // Assuming '/upload' is the endpoint
+            method: 'POST',
+            body: formData,
+            // Headers might be needed depending on backend setup (e.g., Authorization)
+            // headers: { 'Authorization': 'Bearer YOUR_TOKEN_HERE' }
+        });
+
+        if (!response.ok) {
+            // Handle HTTP errors (e.g., 4xx, 5xx)
+            const errorText = await response.text();
+            throw new Error(`Backend error: ${response.status} ${response.statusText} - ${errorText}`);
+        }
+
+        const data = await response.json(); // Assuming backend returns JSON data
+        return data;
+    } catch (error) {
+        console.error('Error uploading file:', error);
+        // Rethrow or return an error structure so the caller can handle it
+        throw error;
+    }
+}
+
+
 function handleFiles(files) {
   [...files].forEach(file => {
     const listItem = document.createElement("li");
@@ -63,24 +92,22 @@ function handleFiles(files) {
       listItem.style.color = "red";
       status.innerHTML += `<p>❌ ${file.name} was rejected (unsupported format)</p>`;
     } else {
-      listItem.textContent = `${file.name} - ⏳ Processing...`;
+      listItem.textContent = `${file.name} - ⏳ Uploading & Processing...`;
       listItem.style.color = "orange";
-      processFileMock(file).then(data => {
-        const issues = validateInvoiceData(data);
-        if (issues.length > 0) {
-          listItem.textContent = `${file.name} - ⚠️ Issues Found`;
-          listItem.style.color = "orange";
-          status.innerHTML += `<p>⚠️ ${file.name} processed with validation issues:</p>`;
-          issues.forEach(issue => {
-            status.innerHTML += `<p style="margin-left: 1rem;">- ${issue}</p>`;
-          });
-        } else {
-          listItem.textContent = `${file.name} - ✅ Processed (Vendor: ${data.vendor})`;
-          listItem.style.color = "green";
-          status.innerHTML += `<p>✅ ${file.name} processed - Invoice #${data.invoiceNumber}, Total $${data.totalAmount}</p>`;
-        }
+      processFileBackend(file).then(data => { // Use the backend processing function
+        // Assuming successful processing returns data object
+        listItem.textContent = `${file.name} - ✅ Processed (Vendor: ${data.vendor})`;
+        listItem.style.color = "green";
+        status.innerHTML += `<p>✅ ${file.name} processed - Invoice #${data.invoiceNumber}, Total $${data.totalAmount}</p>`;
+
         transactions.push({ ...data, fileName: file.name });
         addTransactionToTable(data, file.name);
+      }).catch(error => {
+          // Handle errors from backend processing
+          listItem.textContent = `${file.name} - ❌ Error Processing`;
+          listItem.style.color = "red";
+          status.innerHTML += `<p>❌ Error processing ${file.name}: ${error.message}</p>`;
+          console.error(`Failed to process ${file.name}:`, error);
       });
     }
     fileList.appendChild(listItem);
