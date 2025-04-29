@@ -1,45 +1,86 @@
-import os
 import io
-import uuid
+import json
 import logging
-import asyncio
-from datetime import date, datetime, timedelta
+import os
 import re
-from typing import List, Optional, Dict, Any, Tuple
+import uuid
 from collections import defaultdict
+from datetime import date, datetime, timedelta
+from typing import Any, Dict, List, Optional, Tuple
 
-# --- Core Dependencies ---
-import uvicorn
-from fastapi import FastAPI, File, UploadFile, HTTPException, Form, Query, Depends
-from fastapi.responses import JSONResponse
-from sqlalchemy.ext.asyncio import AsyncSession
 import easyocr
-from PIL import Image
+import google.generativeai as genai
+from google.generativeai.types import HarmBlockThreshold, HarmCategory
+import uvicorn
+from dotenv import load_dotenv
+from fastapi import Depends, FastAPI, File, Form, HTTPException, Query, UploadFile
 from pdf2image import convert_from_bytes
+from PIL import Image
+from pydantic import Field, ValidationError
+from sqlalchemy import text
+from sqlalchemy.ext.asyncio import AsyncSession
 
-# --- Project Imports ---
 from backend import crud, models, schemas
-from backend.database import engine, Base
+from backend.database import Base, engine
 from backend.dependencies import get_db
 
 # --- Configuration & Initialization ---
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
+load_dotenv()
 
-# Initialize EasyOCR Reader (as before)
-ocr_reader = easyocr.Reader(['en'], gpu=False)
-logger.info("EasyOCR Reader initialized using CPU.")
+# --- Configure Gemini ---
+GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
+if not GOOGLE_API_KEY:
+    logger.error("GOOGLE_API_KEY not found in environment variables.")
+else:
+    try:
+        genai.configure(api_key=GOOGLE_API_KEY)
+        logger.info("Google Generative AI SDK configured.")
+    except Exception as e:
+        logger.error(f"Failed to configure Google Generative AI SDK: {e}", exc_info=True)
+
+# --- Define Generation Configuration ---
+# These settings control the behavior of the Gemini model during generation.
+# Adjust these values based on desired output creativity, consistency, and safety.
+generation_config = genai.GenerationConfig(
+    # Accuracy first. Lower values (e.g., 0.1-0.25) make the output more accurate and focused, which is generally better for data extraction tasks.
+    temperature=0.1,
+
+    # Maximum number of tokens to generate in the response. Adjust based on the
+    # expected size of the JSON output for complex invoices. Too low might truncate JSON.
+    max_output_tokens=16384, # Increased slightly for potentially complex invoices/JSON
+
+    # Top-p sampling: Nucleus sampling. Considers only the most probable tokens
+    # with cumulative probability p. Lower values make it more focused. Often used as an
+    # alternative or complement to temperature. 0.95 is a common value.
+    top_p=0.95,
+)
+
+# --- Define Safety Settings ---
+safety_settings = {
+    HarmCategory.HARM_CATEGORY_HARASSMENT: HarmBlockThreshold.BLOCK_NONE,
+    HarmCategory.HARM_CATEGORY_HATE_SPEECH: HarmBlockThreshold.BLOCK_NONE,
+    HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT: HarmBlockThreshold.BLOCK_NONE,
+    HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT: HarmBlockThreshold.BLOCK_NONE,
+}
+
+try:
+    ocr_reader = easyocr.Reader(['en'], gpu=True)
+    logger.info("EasyOCR Reader initialized using GPU.")
+except Exception:
+    ocr_reader = easyocr.Reader(['en'], gpu=False)
+    logger.info("EasyOCR Reader initialized using CPU.")
 
 # --- FastAPI App Setup ---
 app = FastAPI(
-    title="AI Accounting Agent (SQLAlchemy+MySQL)",
-    description="Processes invoices using EasyOCR, stores data in MySQL via SQLAlchemy, and offers budgeting, reporting, and cash flow features.",
-    version="0.3.0",
+    title="AI Accounting Agent featuring Gemini, SQLAlchemy, and MySQL",
+    description="Processes invoices using EasyOCR and Gemini (with self-review), stores data in MySQL via SQLAlchemy, and offers budgeting, reporting, and cash flow features.",
+    version="1.0.0",
 )
 
 # --- Helper Functions (OCR, Extraction - Keep as before) ---
 async def perform_ocr_easyocr(file_content: bytes, mimetype: str) -> str:
-    # ... (Keep the implementation from the previous response) ...
     text = ""
     logger.info(f"Starting OCR process for mimetype: {mimetype}")
     try:
@@ -77,82 +118,162 @@ async def perform_ocr_easyocr(file_content: bytes, mimetype: str) -> str:
              raise HTTPException(status_code=500, detail="OCR Error: Failed to process PDF. Ensure Poppler is installed and in PATH.")
         raise HTTPException(status_code=500, detail=f"An error occurred during OCR: {str(e)}")
 
+# --- Gemini Data Extraction with Self-Review Function ---
+def extract_and_review_invoice_data_with_gemini(text: str) -> schemas.InvoiceDataCreate:
+    """
+    Uses Google Gemini Flash model to extract and self-review structured data from OCR text.
+    The model itself determines if manual review is needed based on extraction confidence.
+    
+    Args:
+        text: The raw text extracted from the invoice via OCR.
 
-def extract_invoice_data_from_text_basic(text: str) -> schemas.InvoiceDataCreate:
-    # ... (Keep the implementation from the previous response) ...
-    # !!! IMPORTANT: This function should now return a Pydantic *Create* schema
-    # (schemas.InvoiceDataCreate) instead of the full InvoiceData model,
-    # as the 'id' and relationships are handled by the DB/ORM.
-    logger.info("Attempting basic data extraction using Regex...")
-    # Initialize with the Create schema defaults if applicable
-    data_dict = schemas.InvoiceDataCreate().dict(exclude_unset=True)
-    data_dict['extractedText'] = text
+    Returns:
+        An InvoiceDataCreate schema object populated with extracted data and review status,
+        or an object with status 'Error' if extraction fails.
+    """
+    logger.info("Attempting data extraction and self-review using Gemini Flash...")
 
-    # --- Regex Patterns (Examples - Need Refinement) ---
-    inv_num_match = re.search(r'(?:Invoice|INV)\s*(?:Number|No\.?|#)[:\s]*([A-Z0-9-]+)', text, re.IGNORECASE)
-    if inv_num_match: data_dict['invoiceNumber'] = inv_num_match.group(1).strip()
-
-    date_match = re.search(r'(?:Invoice\s+Date|Date)[:\s]*([\w\s,./-]+)', text, re.IGNORECASE)
-    if date_match:
-        raw_date = date_match.group(1).strip()
-        parsed_date = None
-        for fmt in ('%Y-%m-%d', '%m/%d/%Y', '%b %d, %Y', '%b %d %Y'):
-            try: parsed_date = datetime.strptime(raw_date, fmt).date(); break
-            except ValueError: pass
-        if parsed_date: data_dict['invoiceDate'] = parsed_date
-        else: logger.warning(f"Could not parse extracted Invoice Date: {raw_date}")
-
-    due_date_match = re.search(r'(?:Due\s+Date|Payment\s+Due)[:\s]*([\w\s,./-]+)', text, re.IGNORECASE)
-    if due_date_match:
-        raw_date = due_date_match.group(1).strip()
-        parsed_date = None
-        for fmt in ('%Y-%m-%d', '%m/%d/%Y', '%b %d, %Y', '%b %d %Y'):
-             try: parsed_date = datetime.strptime(raw_date, fmt).date(); break
-             except ValueError: pass
-        if parsed_date: data_dict['dueDate'] = parsed_date
-        else: logger.warning(f"Could not parse extracted Due Date: {raw_date}")
-
-
-    total_match = re.search(r'(?:Total\s*Due|Amount\s*Due|Balance\s*Due|TOTAL)[:\s$]*([0-9,]+\.?\d{0,2})', text, re.IGNORECASE | re.MULTILINE)
-    if not total_match: total_match = re.search(r'^Total[:\s$]*([0-9,]+\.?\d{0,2})', text, re.IGNORECASE | re.MULTILINE)
-    if total_match:
-        try: data_dict['totalAmount'] = float(total_match.group(1).replace(',', ''))
-        except ValueError: logger.warning(f"Could not parse extracted Total Amount: {total_match.group(1)}")
-
-    lines = text.split('\n')
-    if lines:
-        potential_vendor = next((line.strip() for line in lines if line.strip()), None)
-        if potential_vendor and "invoice" not in potential_vendor.lower() and 3 < len(potential_vendor) < 50:
-             data_dict['vendor'] = potential_vendor
-
-    # --- Line Items Placeholder ---
-    logger.warning("Line item, subtotal, and tax extraction not implemented with basic Regex.")
-    data_dict['needsReview'] = True # Flag for review due to incomplete extraction
-
-    # --- Confidence Score ---
-    found_fields = sum([1 for field in ['invoiceNumber', 'invoiceDate', 'totalAmount', 'vendor'] if data_dict.get(field)])
-    data_dict['confidenceScore'] = found_fields / 4.0
-    if data_dict['confidenceScore'] < 0.75: data_dict['needsReview'] = True
-
-    # --- Create Pydantic Schema ---
-    try:
-        invoice_create_schema = schemas.InvoiceDataCreate(**data_dict)
-        invoice_create_schema.processingStatus = "Processed" if not invoice_create_schema.needsReview else "Needs Review"
-        logger.info(f"Extraction complete. Status: {invoice_create_schema.processingStatus}")
-        return invoice_create_schema
-    except Exception as e:
-        logger.error(f"Pydantic validation failed during extraction: {e}", exc_info=True)
-        # Return a schema with error status if validation fails
-        error_schema = schemas.InvoiceDataCreate(
+    if not GOOGLE_API_KEY:
+        logger.error("Gemini API key not configured. Cannot perform AI extraction.")
+        return schemas.InvoiceDataCreate(
             extractedText=text,
             processingStatus="Error",
-            errorMessage=f"Extraction/Validation Error: {str(e)}"
+            errorMessage="AI Service Error: API key not configured."
         )
-        return error_schema
 
+    # --- Define the Prompt for Gemini ---
+    # This prompt guides the model to extract specific fields and return JSON.
+    # Adjust the prompt based on observed results for better accuracy.
+    prompt = f"""
+    You are an Accountant expert, your task is to Reasoning step by step below carefully.
+    Analyze the following text extracted from an invoice using OCR. Extract the specified fields accurately.
+    After extraction, critically review the extracted values based on the source text.
+    Return the result ONLY as a valid JSON object. Do not include any introductory text, explanations, or markdown formatting like ```json.
+    The JSON object should have the following keys:
+    - "extractedData": (object) An object containing the extracted invoice fields:
+        - "vendor": (string) The name of the vendor/supplier. Use null if not found or highly uncertain.
+        - "invoiceDate": (string) The main date of the invoice in "YYYY-MM-DD" format. Use null if not found, ambiguous, or cannot be formatted correctly.
+        - "dueDate": (string) The payment due date in "YYYY-MM-DD" format. Use null if not found or cannot be formatted correctly.
+        - "invoiceNumber": (string) The unique invoice identifier/number. Use null if not found or highly uncertain.
+        - "lineItems": (array of objects) A list of line items. Each object should have: "description" (string), "quantity" (number, default 1.0), "price" (number, default 0.0), "lineTotal" (number, default 0.0). Return [] if none are clearly identifiable.
+        - "subtotal": (number) The total amount before taxes. Use null if not found or highly uncertain.
+        - "tax": (number) The total tax amount. Use null if not found or highly uncertain.
+        - "totalAmount": (number) The final total amount due. Use null if not found or highly uncertain.
+        - "currency": (string) The currency code (e.g., "USD", "EUR"). Default to "USD" if not found.
+    - "needsReview": (boolean) Set to true if you have low confidence in any key extraction (e.g., ambiguous vendor, unparseable date, unclear total, inconsistent sums), or if line item extraction was difficult/incomplete. Otherwise, set to false.
+    - "reviewReason": (string) If needsReview is true, provide a brief reason (e.g., "Ambiguous invoice date format", "Total amount doesn't match line items sum", "Low confidence in vendor name"). If needsReview is false, set this to null or an empty string.
 
+    Prioritize accuracy. If a value is uncertain or cannot be reliably extracted, represent it as null within the "extractedData" object and set "needsReview" to true with a reason. Ensure dates are strictly "YYYY-MM-DD".
+
+    OCR Text to Analyze:
+    --- START OF TEXT ---
+    {text}
+    --- END OF TEXT ---
+
+    JSON Output:
+    """
+
+    try:
+        model = genai.GenerativeModel('gemini-2.0-flash')
+        # For high-load applications, consider running this in a thread pool:
+        # response = await asyncio.to_thread(model.generate_content, prompt)
+        response = model.generate_content(
+            prompt,
+            generation_config=generation_config,
+            safety_settings=safety_settings
+        )
+
+        logger.debug(f"Gemini Raw Response Text: {response.text}")
+
+        # --- Parse the Response ---
+        try:
+            # Clean potential markdown fences if the model didn't follow instructions perfectly
+            cleaned_text = response.text.strip().removeprefix('```json').removesuffix('```').strip()
+            gemini_result = json.loads(cleaned_text)
+            
+            # --- Validate Gemini Response Structure ---
+            if "extractedData" not in gemini_result or "needsReview" not in gemini_result:
+                logger.error("Gemini response missing required keys ('extractedData', 'needsReview').")
+                logger.error(f"Gemini response was: {gemini_result}")
+                return schemas.InvoiceDataCreate(
+                    extractedText=text,
+                    processingStatus="Error",
+                    errorMessage="AI Service Error: Invalid response structure from AI."
+                )
+
+            extracted_data = gemini_result["extractedData"]
+            needs_review_ai = gemini_result.get("needsReview", True) # Default to needing review if missing
+            review_reason = gemini_result.get("reviewReason", "Reason not provided by AI.") if needs_review_ai else None
+            
+            # --- Map to Pydantic Schema ---
+            extracted_data['extractedText'] = text
+            extracted_data['needsReview'] = needs_review_ai # Use AI's decision
+            extracted_data['errorMessage'] = review_reason if needs_review_ai else None # Use reason as error/info message
+            
+            # Determine processing status based on AI review
+            if needs_review_ai:
+                extracted_data['processingStatus'] = "Needs Review"
+            else:
+                extracted_data['processingStatus'] = "Processed"
+
+            # Validate and create the Pydantic object
+            try:
+                # Ensure lineItems is a list, default if missing/null
+                if 'lineItems' not in extracted_data or extracted_data['lineItems'] is None:
+                    extracted_data['lineItems'] = []
+                invoice_schema = schemas.InvoiceDataCreate(**extracted_data)
+                # Pydantic validation still runs (e.g., date parsing from string)
+                logger.info(f"Gemini extraction/review complete. Status determined by AI: {invoice_schema.processingStatus}")
+                return invoice_schema
+
+            except ValidationError as e:
+                logger.error(f"Pydantic validation failed after Gemini extraction/review: {e}", exc_info=True)
+                # Even if AI said 'Processed', if Pydantic fails, mark as Error
+                return schemas.InvoiceDataCreate(
+                    extractedText=text,
+                    processingStatus="Error",
+                    errorMessage=f"Data Validation Error after AI processing: {str(e)}",
+                    needsReview=True # Force review if Pydantic fails
+                )
+            except Exception as pydantic_err: # Catch other potential Pydantic errors
+                 logger.error(f"Error creating Pydantic schema after Gemini: {pydantic_err}", exc_info=True)
+                 return schemas.InvoiceDataCreate(
+                    extractedText=text,
+                    processingStatus="Error",
+                    errorMessage=f"Internal Error: Failed creating data structure ({type(pydantic_err).__name__}).",
+                    needsReview=True
+                 )
+
+        except json.JSONDecodeError as e:
+            # ... (keep JSON decode error handling as before) ...
+            logger.error(f"Failed to decode JSON response from Gemini: {e}", exc_info=True)
+            logger.error(f"Gemini response text was: {response.text}")
+            return schemas.InvoiceDataCreate(
+                extractedText=text,
+                processingStatus="Error",
+                errorMessage="AI Service Error: Could not parse AI response."
+            )
+        except Exception as e: # Catch other potential errors during parsing/mapping
+             logger.error(f"Error processing Gemini response: {e}", exc_info=True)
+             return schemas.InvoiceDataCreate(
+                extractedText=text,
+                processingStatus="Error",
+                errorMessage=f"AI Service Error: Failed to process AI response ({type(e).__name__})."
+            )
+    
+    except Exception as e:
+        logger.error(f"Error calling Gemini API: {e}", exc_info=True)
+        return schemas.InvoiceDataCreate(
+            extractedText=text,
+            processingStatus="Error",
+            errorMessage=f"AI Service Error: Communication failed ({type(e).__name__})."
+        )
+        
+
+# --- Accounting Engine ---
 def create_transaction_schema_from_invoice(invoice_model: models.Invoice) -> Optional[schemas.TransactionCreate]:
     """Creates a TransactionCreate schema from a saved Invoice ORM model."""
+    # This function now receives an Invoice model potentially populated by Gemini data
     if invoice_model.processingStatus == "Error" or not invoice_model.totalAmount:
         logger.warning(f"Skipping transaction creation for invoice {invoice_model.id} due to status '{invoice_model.processingStatus}' or missing total.")
         return None
@@ -175,22 +296,22 @@ def create_transaction_schema_from_invoice(invoice_model: models.Invoice) -> Opt
         amount=invoice_model.totalAmount,
         currency=invoice_model.currency or "USD",
         glAccount=gl_account,
-        entryType="Debit", # Assuming expense
-        tags=[] # Start with empty tags
+        entryType="Debit",
+        tags=[],
+        paymentMethod=None
     )
     logger.info(f"Prepared transaction schema for invoice {invoice_model.id} with GL Account: {gl_account}")
     return transaction_schema
 
 # --- API Endpoints ---
-
 @app.post("/process", response_model=schemas.ProcessResponse, status_code=201) # Use specific response schema
 async def process_invoice_file(
     file: UploadFile = File(...),
     db: AsyncSession = Depends(get_db) # Inject DB session
 ):
     """
-    Receives invoice, performs OCR, extracts data, saves Invoice and
-    potentially a Transaction to the database.
+    Receives invoice, performs OCR, uses Gemini for data extraction & self-review,
+    saves Invoice and potentially a Transaction to the database.
     """
     logger.info(f"Received file: {file.filename}, content type: {file.content_type}")
 
@@ -200,8 +321,6 @@ async def process_invoice_file(
         logger.error(f"Invalid file type received: {file.content_type}")
         raise HTTPException(status_code=400, detail="Invalid file type.")
 
-    # --- Initialize response data ---
-    # We will build the response from the saved DB object
     db_invoice: Optional[models.Invoice] = None
 
     try:
@@ -211,70 +330,58 @@ async def process_invoice_file(
         # --- Step 4: OCR ---
         ocr_text = await perform_ocr_easyocr(file_content, file.content_type)
         if not ocr_text:
-             # Create an Invoice entry with Error status immediately
-             error_invoice_data = schemas.InvoiceDataCreate(
-                 processingStatus="Error",
-                 errorMessage="OCR Error: No text could be extracted."
-             )
-             db_invoice = await crud.create_invoice(db=db, invoice=error_invoice_data)
-             logger.warning("OCR returned no text. Saved Invoice with Error status.")
-             # Return the created (error) invoice data
-             # Need to manually construct the response schema if relationships are expected
-             return schemas.ProcessResponse.from_orm(db_invoice)
+            # Create an Invoice entry with Error status immediately
+            error_invoice_data = schemas.InvoiceDataCreate(
+                processingStatus="Error",
+                errorMessage="OCR Error: No text could be extracted."
+            )
+            db_invoice = await crud.create_invoice(db=db, invoice=error_invoice_data)
+            logger.warning("OCR returned no text. Saved Invoice with Error status.")
+            return schemas.ProcessResponse.from_orm(db_invoice)
 
-
-        # --- Step 4 & 5: Extraction & Validation ---
-        invoice_create_data = extract_invoice_data_from_text_basic(ocr_text)
-
-        # --- Step 6a: Save Initial Invoice Data ---
-        # Save the extracted data (or error state) to the DB
+        # --- Step 4 & 5: AI Extraction & Self-Review (Gemini) ---
+        invoice_create_data = extract_and_review_invoice_data_with_gemini(ocr_text)
+        # The status (Processed/Needs Review/Error) is now determined by Gemini + Pydantic validation
+        
+        # --- Step 6a: Save Invoice Data (Result from Gemini) ---
         db_invoice = await crud.create_invoice(db=db, invoice=invoice_create_data)
-        logger.info(f"Saved initial invoice data to DB with ID: {db_invoice.id}, Status: {db_invoice.processingStatus}")
+        logger.info(f"Saved invoice data to DB with ID: {db_invoice.id}, Status: {db_invoice.processingStatus}")
 
         # --- Step 6b: Accounting Engine (Create Transaction if applicable) ---
-        if db_invoice.processingStatus != "Error":
+        # Create transaction only if status is 'Processed' (as determined by AI/validation)
+        if db_invoice.processingStatus == "Processed":
             transaction_create_schema = create_transaction_schema_from_invoice(db_invoice)
             if transaction_create_schema:
                 try:
                     db_transaction = await crud.create_transaction(db=db, transaction=transaction_create_schema)
                     logger.info(f"Saved transaction {db_transaction.id} linked to invoice {db_invoice.id}")
-                    # Refresh invoice to potentially load the relationship (if configured)
                     await db.refresh(db_invoice, attribute_names=['transaction'])
                 except Exception as tx_error:
-                    # Handle potential transaction creation errors (e.g., unique constraint)
                     logger.error(f"Failed to create transaction for invoice {db_invoice.id}: {tx_error}", exc_info=True)
-                    # Update invoice status to indicate transaction error
-                    db_invoice.processingStatus = "Error"
-                    db_invoice.errorMessage = f"Transaction Creation Error: {str(tx_error)}"
-                    await crud.update_invoice_status(db, db_invoice.id, "Error", db_invoice.errorMessage)
-                    await db.refresh(db_invoice) # Refresh after update
+                    await crud.update_invoice_status(db, db_invoice.id, "Error", f"Transaction Creation Error: {str(tx_error)}")
+                    await db.refresh(db_invoice)
+        elif db_invoice.processingStatus == "Needs Review":
+            logger.info(f"Invoice {db_invoice.id} flagged for review by AI. Skipping automatic transaction creation.")
+        elif db_invoice.processingStatus == "Error":
+            logger.warning(f"Invoice {db_invoice.id} processing resulted in Error. Skipping transaction creation.")
 
         logger.info(f"Successfully processed file: {file.filename}. Final Invoice Status: {db_invoice.processingStatus}")
 
-        # Convert the final ORM model (with potential relationships loaded) to the Pydantic response model
-        # Ensure relationships like line_items are loaded if needed by the response schema
-        # You might need options(joinedload(models.Invoice.line_items)) in crud.get_invoice if returning full details
         response_data = schemas.ProcessResponse.from_orm(db_invoice)
         return response_data
 
     except HTTPException as http_exc:
         logger.error(f"HTTP Exception during processing {file.filename}: {http_exc.detail}")
-        # If an invoice record was partially created before the error, update its status
         if db_invoice and db_invoice.id:
-             await crud.update_invoice_status(db, db_invoice.id, "Error", f"Processing Error: {http_exc.detail}")
-        # Re-raise the exception for FastAPI to handle
+            await crud.update_invoice_status(db, db_invoice.id, "Error", f"Processing Error: {http_exc.detail}")
         raise http_exc
     except Exception as e:
         logger.error(f"Unexpected error processing file {file.filename}: {e}", exc_info=True)
-        # Update invoice status if possible
         if db_invoice and db_invoice.id:
-             await crud.update_invoice_status(db, db_invoice.id, "Error", f"Unexpected Server Error: {str(e)}")
+            await crud.update_invoice_status(db, db_invoice.id, "Error", f"Unexpected Server Error: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Unexpected Server Error: {str(e)}")
     finally:
         if file: await file.close()
-
-
-from sqlalchemy import text
 
 @app.get("/health")
 async def health_check():
@@ -283,12 +390,12 @@ async def health_check():
         db = get_db()
         async for session in db:
             await session.execute(text("SELECT 1"))
-        db_status = "connected with the database"
+        db_status = "connected with"
     except Exception as e:
         logger.error(f"Database connection check failed: {e}")
         db_status = "disconnected"
+    return {"status": "ok", "ocr_engine": "EasyOCR", "ai_extractor": "Gemini", "database": db_status + " MySQL (SQLAlchemy)."}
 
-    return {"status": "ok", "ocr_engine": "EasyOCR", "database": db_status}
 # --- Budgeting Endpoints (Refactored) ---
 
 @app.post("/budgets", status_code=201, response_model=schemas.Budget)
@@ -545,10 +652,8 @@ async def get_cashflow_forecast_endpoint(
 
 # --- Run the Server ---
 if __name__ == "__main__":
-    logger.info("Starting AI Accounting Agent server with SQLAlchemy/MySQL...")
+    logger.info("Starting AI Accounting Agent server with Gemini+SQLAlchemy+MySQL...")
     # Add logic to create tables on startup for demo purposes if needed
-    async def init_db():
-        async with engine.begin() as conn:
-            await conn.run_sync(Base.metadata.create_all)
-    asyncio.run(init_db())
+    if not GOOGLE_API_KEY:
+        logger.warning("!!! GOOGLE_API_KEY is not set. AI extraction features will fail. !!!")
     uvicorn.run("backend.ai_agent:app", host="0.0.0.0", port=5001, log_level="info", reload=True) # Use reload for dev
