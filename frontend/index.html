@@ -1,111 +1,149 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <meta name="description" content="Dashboard for uploading and managing invoices with the AI Accounting Agent." />
-  <title>AI Accounting Agent Dashboard</title>
-  <link rel="stylesheet" href="./css/styles.css" />
-  <script>
-    // Set backend URL
-    window.BACKEND_URL = 'http://localhost:3001';
-  </script>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="description" content="Dashboard for uploading and managing invoices with the AI Accounting Agent." />
+    <title>AI Accounting Agent Dashboard</title>
+    <link rel="stylesheet" href="./css/styles.css" />
+    <!-- Consider adding a favicon -->
+    <!-- <link rel="icon" href="favicon.ico" type="image/x-icon"> -->
+    <script>
+      // Define backend URL globally (or use environment variables in a build process)
+      // This should point to your Node.js gateway
+      window.NODE_GATEWAY_UPLOAD_URL = 'http://localhost:3000/upload';
+      // This should point to your Python backend (or Node gateway if it proxies reports)
+      window.API_BASE_URL = 'http://localhost:5001';
+    </script>
 </head>
-<body>
-  <header class="main-header">
-    <h1>AI Accounting Agent</h1>
-    <div class="theme-toggle">
-      <label for="themeSelect">Theme:</label>
-      <select id="themeSelect">
-        <option value="light">Light</option>
-        <option value="dark">Dark</option>
-      </select>
-    </div>
-  </header>
+<body data-theme="light"> <!-- Default theme set on body -->
 
-  <main class="dashboard-main">
-
-    <section class="upload-section">
-      <h2>Upload Invoice Files</h2>
-      <div id="drop-area">
-        <p>Drag & drop your files here, or click to browse</p>
-        <input type="file" id="fileElem" accept=".pdf,.jpeg,.jpg,.png" multiple />
-      </div>
-      <ul id="fileList"></ul>
-    </section>
-
-    <section class="status-section">
-      <h2>Processing Status</h2>
-      <div id="status"></div>
-    </section>
-
-    <section class="transactions-section">
-      <h2>Processed Transactions</h2>
-      <div class="table-container">
-        <table id="transactionsTable" aria-label="List of processed invoice transactions">
-          <caption>Summary of recently processed invoices</caption>
-          <thead>
-            <tr>
-              <th scope="col">File Name</th>
-              <th scope="col">Vendor</th>
-              <th scope="col">Invoice #</th>
-              <th scope="col">Invoice Date</th>
-              <th scope="col">Total Amount</th>
-              <th scope="col">Status</th>
-              <th scope="col">Actions</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr class="empty-table-placeholder">
-              <td colspan="7">No transactions yet</td>
-            </tr>
-          </tbody>
-        </table>
-      </div>
-    </section>
-
-    <section class="reports-section">
-      <h2>Generate Report</h2>
-      <p>Select a report type and click Generate.</p>
-      <div class="report-controls">
-        <label for="reportType">Report Type:</label>
-        <select id="reportType">
-          <option value="">-- Select Report --</option>
-          <option value="pnl">Profit & Loss</option>
-          <option value="balance">Balance Sheet</option>
-          <option value="ap">Accounts Payable Aging</option>
-          <option value="cashflow">Cash Flow Statement</option>
-          <option value="transactions">Transaction List</option>
-          <option value="sales">Sales Report</option>
-          <option value="expenses">Expenses Report</option>
-        </select>
-        <div id="dateRangePicker" class="date-range" style="display: none;">
-          <label for="startDate">Start Date:</label>
-          <input type="date" id="startDate" name="startDate">
-          <label for="endDate">End Date:</label>
-          <input type="date" id="endDate" name="endDate">
+    <header class="main-header">
+        <h1>AI Accounting Agent</h1>
+        <!-- Updated theme selector class -->
+        <div class="theme-selector">
+            <label for="themeSelect">Theme:</label>
+            <select id="themeSelect" aria-label="Select color theme">
+                <option value="light">Light</option>
+                <option value="dark">Dark</option>
+                <!-- <option value="system">System</option> -->
+            </select>
         </div>
-        <button id="generateReportButton">Generate</button>
-      </div>
-      <div id="reportOutput" aria-live="polite"></div>
-    </section>
-  </main>
+    </header>
 
-  
-  <footer class="main-footer">
-    <p>© <span id="currentYear"></span> AI Accounting Agent. All rights reserved.</p>
-  </footer>
-  <script>
-    document.getElementById('currentYear').textContent = new Date().getFullYear();
-  </script>
-  <script type="module" src="./js/fileHandler.js"></script>
-  <script type="module" src="./js/reportHandler.js"></script>
-  <script>
-    // Theme toggle functionality
-    const themeSelect = document.getElementById('themeSelect');
-    themeSelect.addEventListener('change', (e) => {
-      document.body.setAttribute('data-theme', e.target.value);
-    });
-  </script>
+    <main class="dashboard-main">
+
+        <!-- Updated Upload Section -->
+        <section class="upload-section" aria-labelledby="upload-heading">
+            <h2 id="upload-heading">Upload Invoices</h2>
+            <!-- Use form for semantics -->
+            <form id="uploadForm" action="/upload" method="post" enctype="multipart/form-data">
+                 <!-- Drop Area Label -->
+                <label for="fileInput" id="drop-area" role="button" tabindex="0" aria-label="Invoice upload area: Drag and drop files here or click to browse">
+                    <p>Drag & drop PDF, JPG, or PNG files here</p>
+                    <p>or</p>
+                    <span class="browse-button">Browse Files</span>
+                    <!-- Hidden file input -->
+                    <input type="file" id="fileInput" name="invoice" accept=".pdf,.jpeg,.jpg,.png" multiple hidden />
+                </label>
+            </form>
+            <!-- File Preview List -->
+            <h3>Files Ready for Upload:</h3>
+            <!-- Updated ID -->
+            <ul id="filePreviewList" aria-live="polite">
+                <!-- Placeholder added -->
+                <li class="empty-list-placeholder">No files selected yet.</li>
+            </ul>
+            <!-- Upload Button -->
+            <button type="button" id="uploadButton" disabled>Upload Selected Files</button>
+        </section>
+
+        <!-- Updated Status Section -->
+        <section class="status-section" aria-labelledby="status-heading">
+            <h2 id="status-heading">Processing Status</h2>
+            <!-- Updated ID -->
+            <div id="processingStatus" aria-live="polite" role="status">
+                <!-- Initial placeholder -->
+                <p>Upload status and processing results will appear here.</p>
+            </div>
+        </section>
+
+        <!-- Transactions Section (mostly unchanged, but placeholder text updated) -->
+        <section class="transactions-section" aria-labelledby="transactions-heading">
+            <h2 id="transactions-heading">Processed Transactions</h2>
+            <div class="table-container">
+                <table id="transactionsTable" aria-label="List of processed invoice transactions">
+                    <caption>Summary of recently processed invoices</caption>
+                    <thead>
+                        <tr>
+                            <th scope="col">File Name</th>
+                            <th scope="col">Vendor</th>
+                            <th scope="col">Invoice #</th>
+                            <th scope="col">Invoice Date</th>
+                            <th scope="col">Total Amount</th>
+                            <th scope="col">Status</th>
+                            <th scope="col">Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <!-- Updated placeholder text -->
+                        <tr class="empty-table-placeholder">
+                            <td colspan="7">No transactions processed yet. Upload invoices to see results.</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+             <!-- <nav aria-label="Transaction pagination"> ... </nav> -->
+        </section>
+
+        <!-- Reports Section (mostly unchanged) -->
+        <section class="reports-section" aria-labelledby="reports-heading">
+            <h2 id="reports-heading">Generate Reports</h2>
+            <!-- Removed redundant <p> tag -->
+            <div class="report-controls">
+                <label for="reportType">Report Type:</label>
+                <select id="reportType">
+                    <option value="">-- Select Report --</option>
+                    <option value="pnl">Profit & Loss</option>
+                    <option value="balance">Balance Sheet</option>
+                    <option value="ap">Accounts Payable Aging</option>
+                    <option value="cashflow">Cash Flow Statement</option>
+                    <option value="transactions">Transaction List</option>
+                    <!-- Removed extra options not handled in JS yet -->
+                    <!-- <option value="sales">Sales Report</option> -->
+                    <!-- <option value="expenses">Expenses Report</option> -->
+                </select>
+                <div id="dateRangePicker" class="date-range" style="display: none;">
+                     <label for="startDate">Start Date:</label>
+                     <input type="date" id="startDate" name="startDate">
+                     <label for="endDate">End Date:</label>
+                     <input type="date" id="endDate" name="endDate">
+                </div>
+                <button id="generateReportButton">Generate Report</button> <!-- Changed ID -->
+            </div>
+            <div id="reportOutput" aria-live="polite">
+                <!-- Initial placeholder -->
+                <p>Select a report type and click Generate.</p>
+            </div>
+        </section>
+
+    </main>
+
+    <footer class="main-footer">
+        <p>© <span id="currentYear"></span> AI Accounting Agent. All rights reserved.</p>
+    </footer>
+
+    <!-- Load JavaScript modules -->
+    <!-- Moved theme script to its own file -->
+    <script type="module" src="./js/themeHandler.js"></script>
+    <script type="module" src="./js/fileHandler.js"></script>
+    <script type="module" src="./js/reportHandler.js"></script>
+    <!-- Optional: Add main.js if needed for further initialization -->
+    <!-- <script type="module" src="./js/main.js"></script> -->
+
+    <!-- Simple script for dynamic year in footer -->
+    <script>
+        document.getElementById('currentYear').textContent = new Date().getFullYear();
+    </script>
 </body>
 </html>
