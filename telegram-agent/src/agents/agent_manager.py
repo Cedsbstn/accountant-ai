@@ -3,7 +3,7 @@ from langgraph.graph import END, START, StateGraph
 from langgraph.prebuilt import tools_condition
 from langgraph.graph.message import AnyMessage, add_messages
 from langchain_core.messages import HumanMessage, SystemMessage, ToolMessage
-from src.prompts.manager_prompt import TELEGRAM_ASSISTANT
+from src.prompts.manager_prompt import TELEGRAM_ASSISTANT_MANAGER
 from src.agents.email import invoke_email_agent
 from src.agents.calendar import invoke_calendar_agent
 from src.agents.notion import invoke_notion_agent
@@ -174,7 +174,7 @@ class ManagerAgent:
             if not current_state.get("messages"):
                 self.app.update_state(
                     config,
-                    {"messages": [SystemMessage(content=TELEGRAM_ASSISTANT)]}
+                    {"messages": [SystemMessage(content=TELEGRAM_ASSISTANT_MANAGER)]}
                 )
         except Exception as e:
             logger.error(f"Error initializing state: {e}", exc_info=True)

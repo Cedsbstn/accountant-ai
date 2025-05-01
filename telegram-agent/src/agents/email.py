@@ -5,7 +5,7 @@ import google.generativeai as genai
 from google.generativeai.types import HarmBlockThreshold, HarmCategory
 from langsmith import traceable
 from src.tools.email import SendEmail, FindContactEmail, ReadEmails
-from src.prompts import EMAIL_AGENT_PROMPT
+from src.prompts import EMAIL_AGENT
 from src.utils import print_agent_output
 from dotenv import load_dotenv
 
@@ -55,7 +55,7 @@ model = genai.GenerativeModel('gemini-2.0-flash')
         # For high-load applications, consider running this in a thread pool:
         # response = await asyncio.to_thread(model.generate_content, prompt)
 response = model.generate_content(
-            EMAIL_AGENT_PROMPT,
+            EMAIL_AGENT,
             generation_config=generation_config,
             safety_settings=safety_settings
         )
