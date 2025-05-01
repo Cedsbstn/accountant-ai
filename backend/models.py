@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Float, Date, Boolean, Text, ForeignKey, JSON, Index
+from sqlalchemy import Column, Integer, String, Float, Date, DateTime, Boolean, Text, ForeignKey, JSON, Index
 from sqlalchemy.orm import relationship
 from backend.database import Base # Import Base from database.py
 import uuid
@@ -81,6 +81,23 @@ class Budget(Base):
     # from sqlalchemy import UniqueConstraint
     # __table_args__ = (UniqueConstraint('category', 'periodType', 'periodValue', name='uq_budget_period'),)
 
+class Checkpoint(Base):
+    __tablename__ = "checkpoints"
+    
+    thread_id = Column(String(255), primary_key=True)
+    checkpoint = Column(JSON, nullable=False)
+    config_data = Column(JSON, nullable=False)
+    created_at = Column(DateTime, server_default='CURRENT_TIMESTAMP')
+    updated_at = Column(DateTime, server_default='CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP')
+    
+    def to_dict(self):
+        return {
+            "thread_id": self.thread_id,
+            "checkpoint": self.checkpoint,
+            "config_data": self.config_data,
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+            "updated_at": self.updated_at.isoformat() if self.updated_at else None
+        }
 # Add Vendor model if needed (e.g., to store default GL account)
 # class Vendor(Base):
 #    __tablename__ = "vendors"
