@@ -8,7 +8,7 @@ The project aims to tackle the difficulties of automatically treat invoices, col
 - [@Ferry Yun Kurniawan](https://github.com/ferryu46)
 
 🚀 Project Overview
-ORCA provides a unified environment where developers can search for GitHub projects, analyze codebases with AI assistance, generate production-level code, create applications from scratch, and deploy directly to GitHub repositories. The platform leverages Microsoft’s Azure, Visual Studio Code inspiration, GitHub Copilot, and Azure Speech Services to deliver an intelligent, voice-enabled development experience.
+The accountant AI agent provides a helpful tool for individual or small business who need accounting automation by giving invoice and related documents.
 
 📋 Table of Contents
 Project Overview
